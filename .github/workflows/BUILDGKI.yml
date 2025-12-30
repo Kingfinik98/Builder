@@ -271,17 +271,18 @@ jobs:
 
           if [ -n "$KERNEL_NAME_INPUT" ]; then
             SUFFIX=""
+            # --- PERUBAHAN 1: GANTI NAMA SUFFIX SUSFS & KPROBES ---
             if [ "$HOOK_METHOD" = "susfs" ]; then
-              SUFFIX="-SUSFS"
+              SUFFIX="-SUS"
             else
               SUFFIX="-KPROBES"
             fi
             
-            # --- PERBAIKAN: GANTI KE HURUF KECIL DI SINI JUGA ---
+            # --- PERUBAHAN 2: GANTI NAMA SUFFIX SOC ---
             if [ "$PERFORMANCE_PATCH" = "Snapdragon" ]; then
-              SUFFIX="${SUFFIX}-qualcomm"
+              SUFFIX="${SUFFIX}-Qcom"
             else
-              SUFFIX="${SUFFIX}-mediatek"
+              SUFFIX="${SUFFIX}-Mtk"
             fi
             
             echo "Setting custom kernel name: $KERNEL_NAME_INPUT$SUFFIX"
@@ -344,16 +345,18 @@ jobs:
           CLANG_VERSION_STRING="${{ github.event.inputs.clang_version }}"
           PERFORMANCE_PATCH_INPUT="${{ github.event.inputs.performance_patch }}"
 
+          # Variabel ini tetap diperlukan untuk nama file zip
           if [ "$HOOK_METHOD" = "susfs" ]; then
             VARIANT="SusFS"
           else
             VARIANT="Kprobes"
           fi
 
+          # --- PERUBAHAN 3: GANTI NAMA SOC_TUNING ---
           if [ "$PERFORMANCE_PATCH_INPUT" = "Snapdragon" ]; then
-            SOC_TUNING="qualcomm"
+            SOC_TUNING="Qcom"
           else
-            SOC_TUNING="mediatek"
+            SOC_TUNING="Mtk"
           fi
 
           BUILD_DATE=$(date +"%Y%m%d")
@@ -387,10 +390,14 @@ jobs:
           echo "🔽 Cloning anykernel from $ANYKERNEL_REPO"
           git clone -q --depth=1 $ANYKERNEL_REPO -b $ANYKERNEL_BRANCH anykernel
           
-          KERNEL_STRING="${{ env.KERNEL_NAME }} ${{ env.RELEASE }} ${{ env.BASE_LINUX_VERSION }} ${{ env.VARIANT }}"
-          if [ "${{ env.VARIANT }}" == "SusFS" ]; then
+          # --- PERUBAHAN 4: BUILD KERNEL STRING SESUAI GAMBAR ---
+          KERNEL_STRING="${{ env.KERNEL_NAME }} ${{ env.RELEASE }} ${{ env.BASE_LINUX_VERSION }}"
+          
+          # Cek input asli hook_method, bukan variabel VARIANT
+          if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
             KERNEL_STRING="$KERNEL_STRING ඞ"
           fi
+          
           KERNEL_STRING="$KERNEL_STRING ${{ env.SOC_TUNING }}"
           
           sed -i "s|kernel.string=.*|kernel.string=$KERNEL_STRING|g" anykernel/anykernel.sh
