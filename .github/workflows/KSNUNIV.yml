@@ -1,4 +1,4 @@
-# KSUN Preshoot Universal mode (Snapdragon/MediaTek)
+#BUILD GKI 5.10.XXX BY BoltX
 
 on:
   workflow_dispatch:
@@ -139,6 +139,11 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           echo "✅ KernelSU-Next added"
           
+          # FIX: Comment out the problematic Kprobes check that runs before .config is available
+          echo "🔧 Fixing Kprobes check timing issue in Kbuild..."
+          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
+          echo "✅ Kbuild patched."
+          
           HOOK_METHOD="${{ github.event.inputs.hook_method }}"
           
           if [ "$HOOK_METHOD" = "susfs" ]; then
@@ -211,6 +216,9 @@ jobs:
           CONFIG_KPM=n
           CONFIG_KSU_SUSFS_SUS_SU=n
           CONFIG_KSU_SYSCALL_HOOK=n
+          # Kprobes is now a hard dependency for KSU-Next, regardless of hook method.
+          CONFIG_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
           EOF
           
           if [ "$HOOK_METHOD" = "susfs" ]; then
@@ -242,8 +250,8 @@ jobs:
           else
             cat >> $DEFCONFIG <<EOF
           # --- Kprobes Hook Method ---
-          # Enable Kprobes Hook
-          CONFIG_KSU_KPROBES_HOOK=y
+          # NOTE: KSU Kprobes Hook is now built-in and doesn't need CONFIG_KSU_KPROBES_HOOK=y
+          # Kprobes is already enabled in the base config.
           # Disable SUSFS and Manual Hook for Kprobes
           CONFIG_KSU_SUSFS=n
           CONFIG_KSU_MANUAL_HOOK=n
@@ -375,5 +383,5 @@ jobs:
               -F file=@gki/out/android12-5.10/common/arch/arm64/boot/Image \
               https://pixeldrain.com/api/file
           else
-            echo "Image file not found. Build likely failed."
+            echo "Image file not found. Build likely failed." 
           fi
