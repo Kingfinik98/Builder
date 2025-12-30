@@ -269,30 +269,27 @@ jobs:
           HOOK_METHOD="${{ github.event.inputs.hook_method }}"
           PERFORMANCE_PATCH="${{ github.event.inputs.performance_patch }}"
 
+          # --- PERUBAHAN UTAMA: MEMBANGUN VERSI SESUAI CONTOH ---
+          SUFFIX=""
           if [ -n "$KERNEL_NAME_INPUT" ]; then
-            SUFFIX=""
-            # --- PERUBAHAN 1: GANTI NAMA SUFFIX SUSFS & KPROBES ---
-            if [ "$HOOK_METHOD" = "susfs" ]; then
-              SUFFIX="-SUS"
-            else
-              SUFFIX="-KPROBES"
-            fi
-            
-            # --- PERUBAHAN 2: GANTI NAMA SUFFIX SOC ---
-            if [ "$PERFORMANCE_PATCH" = "Snapdragon" ]; then
-              SUFFIX="${SUFFIX}-Qcom"
-            else
-              SUFFIX="${SUFFIX}-Mtk"
-            fi
-            
-            echo "Setting custom kernel name: $KERNEL_NAME_INPUT$SUFFIX"
-            if grep -q '^EXTRAVERSION *=' Makefile; then
-              sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = -$KERNEL_NAME_INPUT$SUFFIX/" Makefile
-            else
-              echo "EXTRAVERSION = -$KERNEL_NAME_INPUT$SUFFIX" >> Makefile
-            fi
+            SUFFIX="-$KERNEL_NAME_INPUT"
+          fi
+
+          if [ "$HOOK_METHOD" = "susfs" ]; then
+            SUFFIX="$SUFFIX-ඞ-SuS"
+          fi
+
+          if [ "$PERFORMANCE_PATCH" = "Snapdragon" ]; then
+            SUFFIX="$SUFFIX-Qcom"
           else
-             echo "Kernel name input is empty. Skipping custom name (Using Default)."
+            SUFFIX="$SUFFIX-Mtk"
+          fi
+          
+          echo "Setting custom kernel name: $SUFFIX"
+          if grep -q '^EXTRAVERSION *=' Makefile; then
+            sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = $SUFFIX/" Makefile
+          else
+            echo "EXTRAVERSION = $SUFFIX" >> Makefile
           fi
 
       - name: Setup Clang
@@ -327,9 +324,11 @@ jobs:
       - name: Setup Environment Variables for Packaging
         id: vars
         run: |
+          # Ambil versi DASAR kernel
           BASE_LINUX_VERSION=$(make -s kernelversion -C gki/common | tr -d '\n\r')
           echo "BASE_LINUX_VERSION=$BASE_LINUX_VERSION" >> $GITHUB_ENV
           
+          # Ambil versi LENGKAP kernel (dengan suffix)
           LINUX_VERSION=$(make -s kernelversion -C gki/common | tr -d '\n\r')
           echo "LINUX_VERSION=$LINUX_VERSION" >> $GITHUB_ENV
           
@@ -343,36 +342,23 @@ jobs:
           HOOK_METHOD="${{ github.event.inputs.hook_method }}"
           STATUS="${{ github.event.inputs.release_status }}"
           CLANG_VERSION_STRING="${{ github.event.inputs.clang_version }}"
-          PERFORMANCE_PATCH_INPUT="${{ github.event.inputs.performance_patch }}"
 
-          # Variabel ini tetap diperlukan untuk nama file zip
+          # Tentukan nama Varian untuk nama file zip
           if [ "$HOOK_METHOD" = "susfs" ]; then
             VARIANT="SusFS"
           else
             VARIANT="Kprobes"
           fi
 
-          # --- PERUBAHAN 3: GANTI NAMA SOC_TUNING ---
-          if [ "$PERFORMANCE_PATCH_INPUT" = "Snapdragon" ]; then
-            SOC_TUNING="Qcom"
-          else
-            SOC_TUNING="Mtk"
-          fi
-
           BUILD_DATE=$(date +"%Y%m%d")
           KBUILD_BUILD_TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S %Z")
           RELEASE="v${BUILD_DATE}"
           
-          if [ "$STATUS" == "BETA" ]; then
-            BUILD_TIME=$(date +"%H%M")
-            AK3_ZIP_NAME="AK3-${KERNEL_NAME}-${LINUX_VERSION}-${BUILD_DATE}-${BUILD_TIME}-${VARIANT}.zip"
-          else
-            AK3_ZIP_NAME="AK3-${KERNEL_NAME}-${RELEASE}-${LINUX_VERSION}-${VARIANT}.zip"
-          fi
+          # --- PERUBAHAN NAMA FILE ZIP LEBIH RAPI ---
+          AK3_ZIP_NAME="AK3-${KERNEL_NAME}-${RELEASE}-${BASE_LINUX_VERSION}-${VARIANT}.zip"
           
           echo "KERNEL_NAME=$KERNEL_NAME" >> $GITHUB_ENV
           echo "VARIANT=$VARIANT" >> $GITHUB_ENV
-          echo "SOC_TUNING=$SOC_TUNING" >> $GITHUB_ENV
           echo "STATUS=$STATUS" >> $GITHUB_ENV
           echo "RELEASE=$RELEASE" >> $GITHUB_ENV
           echo "AK3_ZIP_NAME=$AK3_ZIP_NAME" >> $GITHUB_ENV
@@ -390,16 +376,8 @@ jobs:
           echo "🔽 Cloning anykernel from $ANYKERNEL_REPO"
           git clone -q --depth=1 $ANYKERNEL_REPO -b $ANYKERNEL_BRANCH anykernel
           
-          # --- PERUBAHAN 4: BUILD KERNEL STRING SESUAI GAMBAR ---
-          KERNEL_STRING="${{ env.KERNEL_NAME }} ${{ env.RELEASE }} ${{ env.BASE_LINUX_VERSION }}"
-          
-          # Cek input asli hook_method, bukan variabel VARIANT
-          if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
-            KERNEL_STRING="$KERNEL_STRING ඞ"
-          fi
-          
-          KERNEL_STRING="$KERNEL_STRING ${{ env.SOC_TUNING }}"
-          
+          # --- PERUBAHAN: GUNAKAN VERSI LENGKAP UNTUK KERNEL STRING ---
+          KERNEL_STRING="${{ env.LINUX_VERSION }}"
           sed -i "s|kernel.string=.*|kernel.string=$KERNEL_STRING|g" anykernel/anykernel.sh
 
           cd anykernel
