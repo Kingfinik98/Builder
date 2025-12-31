@@ -338,7 +338,8 @@ jobs:
           echo "🚀 Starting kernel packaging process..."
           ANYKERNEL_REPO="https://github.com/linastorvaldz/anykernel"
           ANYKERNEL_BRANCH="android12-5.10"
-          KERNEL_IMAGE="$GITHUB_WORKSPACE/gki/out/android12-5.10/dist/Image"
+          # Gunakan Image yang sudah di-patch KPM, bukan dari dist
+          KERNEL_IMAGE="$GITHUB_WORKSPACE/gki/out/android12-5.10/common/arch/arm64/boot/Image"
           echo "🔽 Cloning anykernel from $ANYKERNEL_REPO"
           git clone -q --depth=1 $ANYKERNEL_REPO -b $ANYKERNEL_BRANCH anykernel
           
