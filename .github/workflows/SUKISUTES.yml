@@ -1,4 +1,4 @@
-name: BoltX SukiSU Kernel Build
+name: BoltX Kernel Build
 
 on:
   workflow_dispatch:
@@ -109,14 +109,14 @@ jobs:
       - name: Clone SukiSU Patch
         run: |
           cd gki
-          echo "[6/15]Cloning SukiSU Patch"
+          echo "[6/14]Cloning SukiSU Patch"
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
           echo "[✓] Patch Clonned"
 
       - name: Add SukiSU and SUSFS
         run: |
           cd gki/common
-          echo "[7/15] Add SukiSU x SUSFS"
+          echo "[7/14] Add SukiSU x SUSFS"
           curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s main
 
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 gki/sus
@@ -126,18 +126,10 @@ jobs:
           patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
           echo "[✓] SUSFS patched"
 
-      - name: Apply New Hooks Patch
-        run: |
-          cd gki/common
-          echo "[8/15] Apply Manual Hook"
-          cp SukiSU_patch/hooks/syscall_hooks.patch .
-          patch -p1 -F 3 < syscall_hooks.patch
-          echo "[✓] Hook Applied"
-
       - name: Apply Hide Stuff Patch
         run: |
           cd gki/common
-          echo "[9/15] Apply Hide stuff patch"
+          echo "[8/14] Apply Hide stuff patch"
           cp SukiSU_patch/69_hide_stuff.patch .
           patch -p1 -F 3 < 69_hide_stuff.patch
           echo "[✓] hide_stuff.patch Applied"
