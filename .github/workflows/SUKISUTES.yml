@@ -31,6 +31,7 @@ on:
         options:
           - 'Snapdragon'
           - 'MediaTek'
+          - 'Universal'
 
 permissions:
   contents: write
@@ -102,27 +103,28 @@ jobs:
           echo "🚀 [MediaTek] Applying performance tuning via defconfig (HZ=500)."
           echo "✅ [MediaTek] Tuning will be applied in the 'Inject All Kernel Configs' step."
 
+      - name: Apply Universal Configuration
+        if: github.event.inputs.performance_patch == 'Universal'
+        working-directory: gki/common
+        run: |
+          echo "🌐 [Universal] Using universal configuration with SUSFS only."
+          echo "✅ [Universal] No SoC-specific performance tuning will be applied."
+
       - name: Tweak build config
         run: |
           sed -i '2d' gki/common/build.config.gki
 
-      - name: Clone SukiSU Patch
-        run: |
-          cd gki
-          echo "[6/13]Cloning SukiSU Patch"
-          git clone https://github.com/ShirkNeko/SukiSU_patch.git
-          echo "[✓] Patch Clonned"
-
-      - name: Add SukiSU and SUSFS
+      - name: Setup SukiSU & SUSFS
         run: |
           cd gki/common
-          echo "[7/13] Add SukiSU x SUSFS"
-          curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s main
-
-          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 gki/sus
-          cp -r gki/sus/kernel_patches/fs .
-          cp -r gki/sus/kernel_patches/include .
-          cp gki/sus/kernel_patches/50_add_susfs_in_gki-android12-5.10.patch .
+          echo "[6/12] Setup SukiSU & SUSFS"
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s tmp-builtin
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+          rm -rf sus/.git
+          susfs=sus/kernel_patches
+          cp -r $susfs/fs .
+          cp -r $susfs/include .
+          cp -r $susfs/50_add_susfs_in_gki-android12-5.10.patch .
           patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
           echo "[✓] SUSFS patched"
 
@@ -161,9 +163,9 @@ jobs:
           PERFORMANCE_PATCH="${{ github.event.inputs.performance_patch }}"
           cat >> $DEFCONFIG <<EOF
           # ===============================================
-          # Konfigurasi SukiSU Ultra (SukiSU + SUSFS + KPM)
+          # Konfigurasi SukiSU Ultra (SukiSU + SUSFS)
           CONFIG_KSU=y
-          CONFIG_KPM=y
+          CONFIG_KPM=n
           CONFIG_KSU_SUSFS_SUS_SU=n
           CONFIG_KSU_SYSCALL_HOOK=n
           CONFIG_KSU_SUSFS=y
@@ -197,6 +199,12 @@ jobs:
           CONFIG_HZ=500
           EOF
             echo "✅ [MediaTek] Applied HZ=500 config."
+          elif [ "$PERFORMANCE_PATCH" = "Universal" ]; then
+            cat >> $DEFCONFIG <<EOF
+          # --- Universal Configuration (No SoC-specific tuning) ---
+          # Using default kernel settings for maximum compatibility
+          EOF
+            echo "✅ [Universal] Applied universal configuration."
           fi
           cat >> $DEFCONFIG <<EOF
           # Add additional tmpfs config setting
@@ -221,8 +229,6 @@ jobs:
           CONFIG_MQ_IOSCHED_BFQ=y
           CONFIG_IOSCHED_BFQ=y
           CONFIG_BFQ_GROUP_IOSCHED=y
-          CONFIG_ZRAM=y
-          CONFIG_ZRAM_WRITEBACK=y
           EOF
 
       - name: Set version
@@ -243,8 +249,10 @@ jobs:
 
           if [ "$PERFORMANCE_PATCH" = "Snapdragon" ]; then
             SUFFIX="$SUFFIX-Qcom"
-          else
+          elif [ "$PERFORMANCE_PATCH" = "MediaTek" ]; then
             SUFFIX="$SUFFIX-Mtk"
+          elif [ "$PERFORMANCE_PATCH" = "Universal" ]; then
+            SUFFIX="$SUFFIX-Uni"
           fi
           
           echo "Setting custom kernel name: $SUFFIX"
@@ -282,16 +290,6 @@ jobs:
         working-directory: gki
         run: |
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
-
-      - name: Patch Image
-        run: |
-          echo "[Additional] Pathcing KPM"
-          cd gki/out/android12-5.10/common/arch/arm64/boot
-          curl -LSs https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/main/kpm/patch_linux -o patch
-          chmod 777 patch
-          ./patch
-          mv -f oImage Image
-          echo "[✓] Patched"
 
       - name: Setup Environment Variables for Packaging
         id: vars
@@ -338,8 +336,8 @@ jobs:
           echo "🚀 Starting kernel packaging process..."
           ANYKERNEL_REPO="https://github.com/linastorvaldz/anykernel"
           ANYKERNEL_BRANCH="android12-5.10"
-          # Gunakan Image yang sudah di-patch KPM, bukan dari dist
-          KERNEL_IMAGE="$GITHUB_WORKSPACE/gki/out/android12-5.10/common/arch/arm64/boot/Image"
+          # Kembali ke path Image asli karena tidak ada patch KPM
+          KERNEL_IMAGE="$GITHUB_WORKSPACE/gki/out/android12-5.10/dist/Image"
           echo "🔽 Cloning anykernel from $ANYKERNEL_REPO"
           git clone -q --depth=1 $ANYKERNEL_REPO -b $ANYKERNEL_BRANCH anykernel
           
@@ -366,7 +364,7 @@ jobs:
           📛 *SukiSU*: ${{ env.KSU }}
           ඞ *SuSFS*: ${{ env.SUSFS_VERSION }}
           🔰 *Compiler*: ${{ env.COMPILER_STRING }}
-          🔗 *Method*: SukiSU Ultra + SUSFS + KPM"
+          🔗 *Method*: SukiSU Ultra + SUSFS"
           gh release create "$RELEASE_TAG" "${{ env.AK3_ZIP_NAME }}" \
             --title "$RELEASE_TAG" \
             --notes "$RELEASE_NOTES" \
