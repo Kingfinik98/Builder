@@ -1,4 +1,4 @@
-name: BoltX Kernel Build
+name: BoltX Kernel SUkiSU Build
 
 on:
   workflow_dispatch:
