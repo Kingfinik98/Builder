@@ -1,4 +1,4 @@
-name: BoltX Kernel Build2
+name: BoltX Kernel SUkiSU
 
 on:
   workflow_dispatch:
@@ -295,16 +295,6 @@ jobs:
         working-directory: gki
         run: |
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
-
-      - name: Patch Image
-        run: |
-          echo "[Additional] Pathcing KPM"
-          cd gki/out/android12-5.10/common/arch/arm64/boot
-          curl -LSs https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/main/kpm/patch_linux -o patch
-          chmod 777 patch
-          ./patch
-          mv -f oImage Image
-          echo "[✓] Patched"
 
       - name: Setup Environment Variables for Packaging
         id: vars
