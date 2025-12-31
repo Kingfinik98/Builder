@@ -427,6 +427,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ github.event.inputs.performance_patch }
+          name: build-log-${{ github.event.inputs.performance_patch }}
           path: gki/out/android12-5.10/common/build.log
           if-no-files-found: warn
