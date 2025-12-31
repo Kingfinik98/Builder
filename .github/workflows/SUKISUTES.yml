@@ -126,13 +126,6 @@ jobs:
           patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
           echo "[✓] SUSFS patched"
 
-      - name: Apply Hide Stuff Patch
-        run: |
-          cd gki/common
-          echo "[8/14] Apply Hide stuff patch"
-          cp SukiSU_patch/69_hide_stuff.patch .
-          patch -p1 -F 3 < 69_hide_stuff.patch
-          echo "[✓] hide_stuff.patch Applied"
 
       - name: Apply common fixes
         working-directory: gki/common
