@@ -1,4 +1,4 @@
-# MamboSU build v3 (Fix SusFS Linker Errors)
+# MamboSU build v4 (Removed Kbuild Fix)
 on:
   workflow_dispatch:
     inputs:
@@ -128,8 +128,7 @@ jobs:
           # Download MamboSU Source (SusFS-RKSU Branch)
           curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-rksu-master/kernel/setup.sh" | bash -s susfs-rksu-master
           
-          # Fix Kbuild error for Kprobes
-          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
+          # Note: Kbuild error fix removed as requested (file might not exist or be named differently)
           
           # Setup SusFS Logic if selected
           if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
@@ -159,16 +158,12 @@ jobs:
 
             // Fix for undefined symbol: susfs_try_umount
             void susfs_try_umount(uid_t uid) {
-                // Stub implementation: Log saja agar kernel tidak panic
-                // (void)uid; // mencegah warning unused parameter jika compiler ketat
-                // pr_info("susfs_try_umount called for uid %d (Stub)\n", uid);
+                // Stub implementation
             }
 
             // Fix for undefined symbol: susfs_add_try_umount
             void susfs_add_try_umount(void __user *arg) {
                 // Stub implementation
-                // (void)arg;
-                // pr_info("susfs_add_try_umount called (Stub)\n");
             }
             EOF
             echo "✅ SusFS missing linker symbols added to fs/susfs.c"
