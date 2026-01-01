@@ -231,6 +231,7 @@ jobs:
           CONFIG_MQ_IOSCHED_BFQ=y
           CONFIG_IOSCHED_BFQ=y
           CONFIG_BFQ_GROUP_IOSCHED=y
+          CONFIG_KALLSYMS=y
           EOF
 
       - name: Set version
