@@ -329,7 +329,7 @@ jobs:
           echo "RELEASE=$RELEASE" >> $GITHUB_ENV
           echo "AK3_ZIP_NAME=$AK3_ZIP_NAME" >> $GITHUB_ENV
           echo "KBUILD_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP" >> $GITHUB_ENV
-          echo "KSU=SukiSU Ultra" >> $GITHUB_ENV
+          echo "KSU=ReSukiSU" >> $GITHUB_ENV
           echo "SUSFS_VERSION=$(curl -s https://gitlab.com/simonpunk/susfs4ksu/raw/gki-android12-5.10/kernel_patches/include/linux/susfs.h | grep -E '^#define SUSFS_VERSION' | cut -d' ' -f3 | sed 's/"//g')" >> $GITHUB_ENV
           echo "COMPILER_STRING=$CLANG_VERSION_STRING" >> $GITHUB_ENV
 
@@ -363,10 +363,10 @@ jobs:
           RELEASE_TAG="${{ env.KERNEL_NAME }}-${{ env.LINUX_VERSION }}-${{ env.RELEASE }}"
           RELEASE_NOTES="🐧 *Linux Version*: ${{ env.LINUX_VERSION }}
           📅 *Build Date*: ${{ env.KBUILD_BUILD_TIMESTAMP }}
-          📛 *SukiSU*: ${{ env.KSU }}
+          📛 *ReSukiSU*: ${{ env.KSU }}
           ඞ *SuSFS*: ${{ env.SUSFS_VERSION }}
           🔰 *Compiler*: ${{ env.COMPILER_STRING }}
-          🔗 *Method*: SukiSU Ultra + SUSFS"
+          🔗 *Method*: ReSukiSU+ Inlin Hook SUSFS"
           gh release create "$RELEASE_TAG" "${{ env.AK3_ZIP_NAME }}" \
             --title "$RELEASE_TAG" \
             --notes "$RELEASE_NOTES" \
