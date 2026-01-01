@@ -1,4 +1,4 @@
-name: BoltX MamboSU Build
+name: BoltX MamboSU Build BoltX 
 
 on:
   workflow_dispatch:
@@ -122,10 +122,10 @@ jobs:
         run: |
           sed -i '2d' gki/common/build.config.gki
 
-      - name: Setup KernelSU-Next & Hook Method
+      - name: Setup MamboSU & Hook Method
         working-directory: gki/common
         run: |
-          echo "🧩 Setup KernelSU-Next dan Hook Method"
+          echo "🧩 Setup MamboSU & Hook Method"
           for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
             if [ -d $KSU_PATH ]; then
               echo "KernelSU driver found in $KSU_PATH, Removing..."
@@ -139,7 +139,8 @@ jobs:
           echo "➡️ adds MamboSU "
           curl -LSs "https://raw.githubusercontent.com/RapliVx/KernelSU/refs/heads/susfs-rksu-master/kernel/setup.sh" | bash -s susfs-rksu-master
           echo "✅ MamboSU added"
-          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
+          # PERBAIKAN: Path ke Kbuild diubah ke KernelSU/Kbuild
+          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' KernelSU/Kbuild
           echo "✅ Kbuild patched."
           HOOK_METHOD="${{ github.event.inputs.hook_method }}"
           if [ "$HOOK_METHOD" = "susfs" ]; then
@@ -192,7 +193,7 @@ jobs:
           PERFORMANCE_PATCH="${{ github.event.inputs.performance_patch }}"
           cat >> $DEFCONFIG <<EOF
           # ===============================================
-          # Konfigurasi KSU NEXT (Base)
+          # Konfigurasi MamboSU (Base)
           CONFIG_KSU=y
           CONFIG_KPM=n
           CONFIG_KSU_SUSFS_SUS_SU=n
@@ -378,7 +379,7 @@ jobs:
           echo "RELEASE=$RELEASE" >> $GITHUB_ENV
           echo "AK3_ZIP_NAME=$AK3_ZIP_NAME" >> $GITHUB_ENV
           echo "KBUILD_BUILD_TIMESTAMP=$KBUILD_BUILD_TIMESTAMP" >> $GITHUB_ENV
-          echo "KSU=KernelSU-Next" >> $GITHUB_ENV
+          echo "KSU=MamboSU" >> $GITHUB_ENV
           echo "SUSFS_VERSION=$(curl -s https://gitlab.com/simonpunk/susfs4ksu/raw/gki-android12-5.10/kernel_patches/include/linux/susfs.h | grep -E '^#define SUSFS_VERSION' | cut -d' ' -f3 | sed 's/"//g')" >> $GITHUB_ENV
           echo "COMPILER_STRING=$CLANG_VERSION_STRING" >> $GITHUB_ENV
 
@@ -427,7 +428,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ github.event.inputs.performance_patch }}
+          name: build-log-${{ github.event.inputs.performance_patch }
           path: gki/out/android12-5.10/common/build.log
           if-no-files-found: warn
 # you made my yml fork? should give credit
