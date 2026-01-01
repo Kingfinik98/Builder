@@ -114,11 +114,11 @@ jobs:
         run: |
           sed -i '2d' gki/common/build.config.gki
 
-      - name: Setup SukiSU & SUSFS
+      - name: Setup ReSukiSU & SUSFS
         run: |
           cd gki/common
-          echo "[6/12] Setup SukiSU & SUSFS"
-          curl -LSs "https://raw.githubusercontent.com/Kingfinik98/ReSukiSU/refs/heads/builtin/kernel/setup.sh" | bash -s builtin
+          echo "[6/12] Setup ReSukiSU & SUSFS"
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s builtin
           git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
           rm -rf sus/.git
           susfs=sus/kernel_patches
