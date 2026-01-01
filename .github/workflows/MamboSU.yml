@@ -1,4 +1,4 @@
-name: BoltX MamboSU Build BoltX 
+name: BoltX MamboSU Build
 
 on:
   workflow_dispatch:
