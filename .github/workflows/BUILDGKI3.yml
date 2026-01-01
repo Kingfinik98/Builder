@@ -86,7 +86,7 @@ jobs:
           cd gki/common
           git remote add kingfinik98 https://github.com/Kingfinik98/kernel-android12-5.10.git
           git fetch -j12 kingfinik98
-          git checkout -b update-master kingfinik98/master
+          git checkout -b update-master-new kingfinik98/master-new
 
       - name: Apply Snapdragon Performance Patch
         if: github.event.inputs.performance_patch == 'Snapdragon'
