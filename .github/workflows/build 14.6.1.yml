@@ -78,29 +78,37 @@ jobs:
           if [ -f "$TARGET" ]; then
             curl -L "$SRC_URL" -o "$TARGET"
           fi
-      - name: Install KernelSU-Next & Patch SuSFS
+      - name: Install KernelSU-Next & Setup SuSFS
         working-directory: gki/common
         run: |
-          # 1. Install Base KernelSU-Next
+          # 1. Install Base KernelSU-Next (Dev-Susfs)
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           
-          # 2. Patch SuSFS (Manual + Fix Conflict) [Sesuai request]
-          echo "Cloning SUSFS Patches (Branch: gki-android14-6.1)..."
-          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android14-6.1 sus_temp
+          # 2. Setup SuSFS (Mengikuti alur BoltX)
+          SUSFS_DIR="susfs"
+          SUSFS_BRANCH="gki-android14-6.1"
           
-          cp -r sus_temp/kernel_patches/fs/* fs/
-          cp -r sus_temp/kernel_patches/include/* include/
-          cp sus_temp/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
+          echo "Cloning SUSFS from Simonpunk..."
+          git clone --depth=1 -q https://gitlab.com/simonpunk/susfs4ksu -b $SUSFS_BRANCH $SUSFS_DIR
           
-          echo "Applying SUSFS Patch..."
-          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
+          SUSFS_PATCHES="${SUSFS_DIR}/kernel_patches"
           
-          echo "Fixing fs/proc/base.c conflict..."
+          echo "Copying SUSFS files (fs & include)..."
+          cp -R $SUSFS_PATCHES/fs/* ./fs
+          cp -R $SUSFS_PATCHES/include/* ./include
+          
+          echo "Applying SUSFS Main Patch..."
+          patch -p1 < $SUSFS_PATCHES/50_add_susfs_in_${SUSFS_BRANCH}.patch || true
+          
+          # Manual fix untuk fs/proc/base.c (Karena patch file tambahan tidak tersedia di CI)
+          # Ini menggantikan fungsi $KERNEL_PATCHES/susfs/fs_proc_base.c-fix-k6.1.patch
+          echo "Checking fs/proc/base.c includes..."
           grep -q "linux/susfs.h" fs/proc/base.c || sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/proc/base.c
           
-          rm -rf sus_temp 50_add_susfs_in_gki-android14-6.1.patch fs/proc/base.c.rej
+          # Cleanup
+          rm -rf $SUSFS_DIR
           
-          # 3. Delete Protected Exports (Wajib untuk GKI agar modul WiFi/Bluetooth jalan)
+          # 3. Delete Protected Exports (Wajib untuk modul WiFi/Bluetooth di GKI)
           rm -f android/abi_gki_protected_exports_aarch64
           rm -f android/abi_gki_protected_exports_x86_64
       - name: Inject All Kernel Configs
