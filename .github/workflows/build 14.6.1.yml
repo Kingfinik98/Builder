@@ -78,32 +78,47 @@ jobs:
           if [ -f "$TARGET" ]; then
             curl -L "$SRC_URL" -o "$TARGET"
           fi
-      - name: Setup KernelSU-Next & Hook Method (final robust version)
+      - name: Setup KernelSU-Next & Hook Method (Official Guide Method)
         working-directory: gki/common
         run: |
+          # Install KernelSU-Next
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
 
-          # Force correct Kconfig source (removes bad nested, adds direct)
+          # Force correct Kconfig source
           sed -i '/kernelsu\/kernel\/Kconfig/d' drivers/Kconfig
           grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-          # Debug to confirm
-          echo "=== KSU source line after fix ==="
-          grep kernelsu drivers/Kconfig
-          echo "=== KSU symlink target ==="
-          ls -la drivers/kernelsu | head -n 10
-          echo "=== KSU Kconfig check ==="
-          ls drivers/kernelsu/Kconfig || echo "Missing - unexpected"
-
           if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
-            # Apply SUSFS logic from snippet for GKI 6.1
             SUSFS_DIR="susfs"
-            SUSFS_PATCHES="${SUSFS_DIR}/kernel_patches"
             SUSFS_BRANCH="gki-android14-6.1"
+            
+            # Clone SUSFS repository
+            echo "Cloning SUSFS..."
             git clone --depth=1 -q https://gitlab.com/simonpunk/susfs4ksu -b $SUSFS_BRANCH $SUSFS_DIR
-            cp -R $SUSFS_PATCHES/fs/* ./fs
-            cp -R $SUSFS_PATCHES/include/* ./include
-            patch -p1 < $SUSFS_PATCHES/50_add_susfs_in_${SUSFS_BRANCH}.patch || true
+            
+            # --- KernelSU Side Patches ---
+            echo "Applying KernelSU side patches..."
+            cp $SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ../KernelSU-Next/
+            cd ../KernelSU-Next
+            patch -p1 < 10_enable_susfs_for_ksu.patch || echo "KSU SUSFS patch applied with warnings/skips"
+            cd common # Return to gki/common
+
+            # --- Kernel Side Patches ---
+            echo "Applying Kernel side patches..."
+            cp $SUSFS_DIR/kernel_patches/50_add_susfs_in_${SUSFS_BRANCH}.patch .
+            
+            # Copy fs and include/linux
+            cp -r $SUSFS_DIR/kernel_patches/fs/* ./fs/
+            mkdir -p ./include/linux
+            cp $SUSFS_DIR/kernel_patches/include/linux/* ./include/linux/
+            
+            # Apply main patch
+            patch -p1 < 50_add_susfs_in_${SUSFS_BRANCH}.patch || echo "Kernel SUSFS patch applied with warnings/skips"
+            
+            # Delete protected exports (Required for modules like WiFi)
+            echo "Removing protected exports..."
+            rm -f android/abi_gki_protected_exports_aarch64
+            rm -f android/abi_gki_protected_exports_x86_64
           fi
       - name: Inject All Kernel Configs
         working-directory: gki/common
@@ -115,34 +130,32 @@ jobs:
             echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_PATH"
           fi
          
-          cat >> "$CONFIG_PATH" <<EOF
-          CONFIG_KSU=y
-          CONFIG_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          EOF
+          # Basic KSU & Required Configs
+          echo "CONFIG_KSU=y" >> "$CONFIG_PATH"
+          echo "CONFIG_KPROBES=y" >> "$CONFIG_PATH"
+          echo "CONFIG_KPROBE_EVENTS=y" >> "$CONFIG_PATH"
+          echo "CONFIG_TMPFS_XATTR=y" >> "$CONFIG_PATH"
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$CONFIG_PATH"
          
           if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
-            cat >> "$CONFIG_PATH" <<EOF
-            CONFIG_KSU_SUSFS=y
-            CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-            CONFIG_KSU_SUSFS_SUS_PATH=y
-            CONFIG_KSU_SUSFS_SUS_MOUNT=y
-            CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-            CONFIG_KSU_SUSFS_SUS_KSTAT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-            CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-            CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-            CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-            CONFIG_KSU_SUSFS_ENABLE_LOG=y
-            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-            EOF
+            # SUSFS Configs
+            echo "CONFIG_KSU_SUSFS=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> "$CONFIG_PATH"
+            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$CONFIG_PATH"
           fi
           
           if [ "${{ github.event.inputs.performance_patch }}" = "MediaTek" ]; then
