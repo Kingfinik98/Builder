@@ -78,80 +78,217 @@ jobs:
           if [ -f "$TARGET" ]; then
             curl -L "$SRC_URL" -o "$TARGET"
           fi
-      - name: Install KernelSU-Next & Setup SuSFS
+      - name: Install KernelSU-Next & SuSFS (New Logic)
         working-directory: gki/common
         run: |
-          # 1. Install Base KernelSU-Next (Dev-Susfs)
+          # Remove existing KernelSU drivers first
+          echo "🧹 Removing existing KernelSU drivers..."
+          for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
+            if [ -d $KSU_PATH ]; then
+              echo "KernelSU driver found in $KSU_PATH, Removing..."
+              KSU_DIR=$(dirname "$KSU_PATH")
+
+              [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
+              [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
+
+              rm -rf $KSU_PATH
+            fi
+          done
+          echo "✅ Existing KernelSU drivers removed"
+          
+          echo "➡️ Menambahkan KernelSU-Next"
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
+          echo "✅ KernelSU-Next added"
           
-          # 2. Setup SuSFS (Mengikuti alur BoltX)
-          SUSFS_DIR="susfs"
-          SUSFS_BRANCH="gki-android14-6.1"
+          # FIX: Comment out the problematic Kprobes check that runs before .config is available
+          echo "🔧 Fixing Kprobes check timing issue in Kbuild..."
+          sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
+          echo "✅ Kbuild patched."
           
-          echo "Cloning SUSFS from Simonpunk..."
-          git clone --depth=1 -q https://gitlab.com/simonpunk/susfs4ksu -b $SUSFS_BRANCH $SUSFS_DIR
+          HOOK_METHOD="${{ github.event.inputs.hook_method }}"
           
-          SUSFS_PATCHES="${SUSFS_DIR}/kernel_patches"
-          
-          echo "Copying SUSFS files (fs & include)..."
-          cp -R $SUSFS_PATCHES/fs/* ./fs
-          cp -R $SUSFS_PATCHES/include/* ./include
-          
-          echo "Applying SUSFS Main Patch..."
-          patch -p1 < $SUSFS_PATCHES/50_add_susfs_in_${SUSFS_BRANCH}.patch || true
-          
-          # Manual fix untuk fs/proc/base.c (Karena patch file tambahan tidak tersedia di CI)
-          # Ini menggantikan fungsi $KERNEL_PATCHES/susfs/fs_proc_base.c-fix-k6.1.patch
-          echo "Checking fs/proc/base.c includes..."
-          grep -q "linux/susfs.h" fs/proc/base.c || sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/proc/base.c
-          
-          # Cleanup
-          rm -rf $SUSFS_DIR
-          
-          # 3. Delete Protected Exports (Wajib untuk modul WiFi/Bluetooth di GKI)
+          if [ "$HOOK_METHOD" = "susfs" ]; then
+            echo "➡️ Cloning susfs4ksu (Android 14-6.1)"
+            git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 sus
+            echo "✅ SUSFS berhasil diclone"
+            echo "🩹 Patching susfs4ksu"
+            susfs=sus/kernel_patches
+            cp -r $susfs/fs .
+            cp -r $susfs/include .
+            cp $susfs/50_add_susfs_in_gki-android14-6.1.patch .
+            patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
+            
+            # Fix for kernel visibility issue
+            echo "🩹 Applying fix for stat.h visibility issue"
+            sed -i '1i#include <linux/stat.h>' include/linux/susfs.h
+            
+            echo "✅ SUSFS patched"
+          else
+            echo "➡️ Menggunakan metode Kprobes Hook"
+            echo "✅ Kprobes setup selesai"
+          fi
+
+          # Delete Protected Exports (Wajib untuk GKI agar modul WiFi/Bluetooth jalan)
           rm -f android/abi_gki_protected_exports_aarch64
           rm -f android/abi_gki_protected_exports_x86_64
+
+      - name: Fix Stack Protector
+        working-directory: gki/common
+        run: |
+          echo "🛠️ Applying manual Stack Protector fix "
+          # 1. Edit arch/arm64/Kconfig
+          sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
+          # 2. Disable di gki_defconfig
+          echo "# CONFIG_STACKPROTECTOR_PER_TASK is not set" >> arch/arm64/configs/gki_defconfig
+          echo "✅ Stack Protector fix applied manually."
+
+      - name: Patch module & DRM (Xiaomi Compat)
+        working-directory: gki/common
+        run: |
+          echo "🩹 [9/10] Menerapkan patch kompatibilitas untuk perangkat Xiaomi"
+          sed -i '/pr_warn.*disagrees about version of symbol.*/,+1 s/.*/return 1;/' kernel/module.c
+          sed -i '/^static int drm_atomic_check_valid_clones/,/^}/d' drivers/gpu/drm/drm_atomic_helper.c
+          sed -i '/ret = drm_atomic_check_valid_clones/,/return ret;/d' drivers/gpu/drm/drm_atomic_helper.c
+          echo "✅ Perbaikan selesai"
+
+      - name: Remove check_defconfig
+        run: |
+          echo "🧹 [Clean-Up] Deleting check_defconfig"
+          sed -i 's/check_defconfig//' gki/common/build.config.gki
+
       - name: Inject All Kernel Configs
         working-directory: gki/common
         run: |
-          CONFIG_PATH="arch/arm64/configs/gki_defconfig"
-         
-          if [ -n "${{ github.event.inputs.kernel_name }}" ]; then
-            echo "CONFIG_LOCALVERSION=\"-${{ github.event.inputs.kernel_name }}\"" >> "$CONFIG_PATH"
-            echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_PATH"
+          echo "⚙️ Menambahkan konfigurasi kernel"
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          
+          HOOK_METHOD="${{ github.event.inputs.hook_method }}"
+          PERFORMANCE_PATCH="${{ github.event.inputs.performance_patch }}"
+          
+          # Base KSU Config
+          cat >> $DEFCONFIG <<EOF
+# ===============================================
+# Konfigurasi KSU NEXT (Base)
+CONFIG_KSU=y
+CONFIG_KPM=n
+CONFIG_KSU_SUSFS_SUS_SU=n
+CONFIG_KSU_SYSCALL_HOOK=n
+# Kprobes is now a hard dependency for KSU-Next, regardless of hook method.
+CONFIG_KPROBES=y
+CONFIG_KPROBE_EVENTS=y
+EOF
+          
+          if [ "$HOOK_METHOD" = "susfs" ]; then
+            cat >> $DEFCONFIG <<EOF
+# --- SUSFS Method (with built-in inline hook) ---
+# Add SUSFS configuration settings
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_PATH=y
+CONFIG_KSU_SUSFS_SUS_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+CONFIG_KSU_SUSFS_SUS_KSTAT=y
+CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+CONFIG_KSU_SUSFS_ENABLE_LOG=y
+CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+# Disable other hooks
+CONFIG_KSU_KPROBES_HOOK=n
+CONFIG_KSU_MANUAL_HOOK=n
+CONFIG_KSU_HAS_MANUAL_HOOK=n
+EOF
+          else
+            cat >> $DEFCONFIG <<EOF
+# --- Kprobes Hook Method ---
+# NOTE: KSU Kprobes Hook is now built-in and doesn't need CONFIG_KSU_KPROBES_HOOK=y
+# Kprobes is already enabled in the base config.
+# Disable SUSFS and Manual Hook for Kprobes
+CONFIG_KSU_SUSFS=n
+CONFIG_KSU_MANUAL_HOOK=n
+CONFIG_KSU_HAS_MANUAL_HOOK=n
+EOF
           fi
-         
-          # Basic KSU & Required Configs
-          echo "CONFIG_KSU=y" >> "$CONFIG_PATH"
-          echo "CONFIG_KPROBES=y" >> "$CONFIG_PATH"
-          echo "CONFIG_KPROBE_EVENTS=y" >> "$CONFIG_PATH"
-          echo "CONFIG_TMPFS_XATTR=y" >> "$CONFIG_PATH"
-          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$CONFIG_PATH"
-         
-          if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
-            # SUSFS Configs
-            echo "CONFIG_KSU_SUSFS=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> "$CONFIG_PATH"
-            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$CONFIG_PATH"
+
+          if [ "$PERFORMANCE_PATCH" = "MediaTek" ]; then
+            cat >> $DEFCONFIG <<EOF
+# --- MediaTek Performance Tuning ---
+# Set HZ to 500 for improved responsiveness
+CONFIG_HZ=500
+EOF
+            echo "✅ [MediaTek] Applied HZ=500 config."
+          else
+            echo "INFO: [Snapdragon] Skipping HZ=500 config."
           fi
           
-          if [ "${{ github.event.inputs.performance_patch }}" = "MediaTek" ]; then
-            echo "CONFIG_HZ=500" >> "$CONFIG_PATH"
+          cat >> $DEFCONFIG <<EOF
+# Add additional tmpfs config setting
+CONFIG_TMPFS_XATTR=y
+CONFIG_TMPFS_POSIX_ACL=y
+# Add additional config setting
+CONFIG_IP_NF_TARGET_TTL=y
+CONFIG_IP6_NF_TARGET_HL=y
+CONFIG_IP6_NF_MATCH_HL=y
+# Add BBR Config
+CONFIG_TCP_CONG_ADVANCED=y
+CONFIG_TCP_CONG_BBR=y
+CONFIG_NET_SCH_FQ=y
+CONFIG_TCP_CONG_BIC=n
+CONFIG_TCP_CONG_WESTWOOD=n
+CONFIG_TCP_CONG_HTCP=n
+CONFIG_DEFAULT_BBR=y
+# Optimasi tambahan (Smooth & Responsiveness)
+CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+CONFIG_SCHED_TUNE=y
+CONFIG_MQ_IOSCHED_KYBER=y
+CONFIG_MQ_IOSCHED_BFQ=y
+CONFIG_IOSCHED_BFQ=y
+CONFIG_BFQ_GROUP_IOSCHED=y
+CONFIG_ZRAM=y
+CONFIG_ZRAM_WRITEBACK=y
+EOF
+
+      - name: Set version
+        working-directory: gki/common
+        run: |
+          echo "" > scripts/setlocalversion
+          chmod +x scripts/setlocalversion
+          
+          KERNEL_NAME="${{ github.event.inputs.kernel_name }}"
+          HOOK_METHOD="${{ github.event.inputs.hook_method }}"
+          PERFORMANCE_PATCH="${{ github.event.inputs.performance_patch }}"
+
+          if [ -n "$KERNEL_NAME" ]; then
+            # Construct of suffix
+            SUFFIX=""
+            if [ "$HOOK_METHOD" = "susfs" ]; then
+              SUFFIX="-SUSFS"
+            else
+              SUFFIX="-KPROBES"
+            fi
+            
+            if [ "$PERFORMANCE_PATCH" = "Snapdragon" ]; then
+              SUFFIX="${SUFFIX}-SNAPDRAGON"
+            else
+              SUFFIX="${SUFFIX}-MEDIATEK"
+            fi
+            
+            echo "Setting custom kernel name: $KERNEL_NAME$SUFFIX"
+            if grep -q '^EXTRAVERSION *=' Makefile; then
+              sed -i "s/^EXTRAVERSION *=.*/EXTRAVERSION = -$KERNEL_NAME$SUFFIX/" Makefile
+            else
+              echo "EXTRAVERSION = -$KERNEL_NAME$SUFFIX" >> Makefile
+            fi
+          else
+             echo "Kernel name input is empty. Skipping custom name (Using Default)."
           fi
+
       - name: Setup Clang
         working-directory: gki
         run: |
