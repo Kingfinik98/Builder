@@ -1,11 +1,12 @@
-name: KSUN 6.1 Preshoot Universal mode (Snapdragon/MediaTek)
+name: KSUN 14.6.1 Preshoot Universal mode (Snapdragon/MediaTek)
+
 on:
   workflow_dispatch:
     inputs:
       kernel_name:
         description: 'Custom Kernel Name (default)'
         required: false
-        default: 'GKI'
+        default: ''
         type: string
       clang_version:
         description: 'Select Clang Version'
@@ -32,10 +33,12 @@ on:
         options:
           - 'Snapdragon'
           - 'MediaTek'
+
 jobs:
   build:
-    name: Build ${{ github.event.inputs.kernel_name }} (${{ github.event.inputs.performance_patch }})
+    name: Build Kernel (${{ github.event.inputs.performance_patch }})
     runs-on: ubuntu-22.04
+
     steps:
       - name: Free disk space
         uses: easimon/maximize-build-space@master
@@ -47,50 +50,82 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
           remove-docker-images: 'true'
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Configure Git
         run: |
           git config --global user.name "titit"
           git config --global user.email "Kingfinik98@gmail.com"
+
       - name: Install build tools
         run: |
           sudo apt update && sudo apt upgrade -y
           sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
             libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+
       - name: Init & Sync GKI
         run: |
           mkdir gki && cd gki
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=1
-          repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j12
-      - name: Update kernel source for GKI 6.1
+          repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j$(nproc --all)
+
+      - name: Update kernel source for GKI 14.6.1
         run: |
           cd gki/common
           git remote add kingfinik https://github.com/Kingfinik98/kernel-android14-6.1.git || true
-          git fetch -j12 kingfinik android14-6.1-lts
+          git fetch -j12 kingfinik
           git checkout -f kingfinik/android14-6.1-lts
+
+      # =================================================================
+      # AWAL: LANGKAH PATCH PERFORMA
+      # =================================================================
       - name: Apply Snapdragon Performance Patch
         if: github.event.inputs.performance_patch == 'Snapdragon'
         working-directory: gki/common
         run: |
+          echo "🚀 [Snapdragon] Applying qcom-cpufreq-hw performance patch (Xiaomi Marble)"
+          echo "INFO: MediaTek tuning (HZ=500) will be SKIPPED."
+
           TARGET="drivers/cpufreq/qcom-cpufreq-hw.c"
           SRC_URL="https://raw.githubusercontent.com/Pzqqt/android_kernel_xiaomi_marble/refs/heads/melt-rebase/drivers/cpufreq/qcom-cpufreq-hw.c"
-          if [ -f "$TARGET" ]; then
-            curl -L "$SRC_URL" -o "$TARGET"
+
+          if [ ! -f "$TARGET" ]; then
+            echo "❌ Target file not found: $TARGET"
+            exit 1
           fi
-      - name: Install KernelSU-Next & SuSFS (New Logic)
+
+          curl -L "$SRC_URL" -o /tmp/qcom-cpufreq-hw.c
+          grep -q "qcom_cpufreq_hw" /tmp/qcom-cpufreq-hw.c || exit 1
+          cp /tmp/qcom-cpufreq-hw.c "$TARGET"
+
+          echo "✅ [Snapdragon] Qualcomm CPUFreq HW performance patch applied."
+
+      - name: Apply MediaTek Performance Tuning
+        if: github.event.inputs.performance_patch == 'MediaTek'
         working-directory: gki/common
         run: |
+          echo "🚀 [MediaTek] Applying performance tuning via defconfig (HZ=500)."
+          echo "INFO: Snapdragon patch will be SKIPPED."
+          echo "✅ [MediaTek] Tuning will be applied in the 'Inject All Kernel Configs' step."
+      # =================================================================
+      # AKHIR: LANGKAH PATCH PERFORMA
+      # =================================================================
+
+      - name: Setup KernelSU-Next & Hook Method
+        working-directory: gki/common
+        run: |
+          echo "🧩 Setup KernelSU-Next dan Hook Method"
+          
           # Remove existing KernelSU drivers first
           echo "🧹 Removing existing KernelSU drivers..."
           for KSU_PATH in drivers/staging/kernelsu drivers/kernelsu KernelSU; do
             if [ -d $KSU_PATH ]; then
               echo "KernelSU driver found in $KSU_PATH, Removing..."
               KSU_DIR=$(dirname "$KSU_PATH")
-
               [ -f "$KSU_DIR/Kconfig" ] && sed -i '/kernelsu/d' $KSU_DIR/Kconfig
               [ -f "$KSU_DIR/Makefile" ] && sed -i '/kernelsu/d' $KSU_DIR/Makefile
-
               rm -rf $KSU_PATH
             fi
           done
@@ -100,15 +135,13 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
           echo "✅ KernelSU-Next added"
           
-          # FIX: Comment out the problematic Kprobes check that runs before .config is available
-          echo "🔧 Fixing Kprobes check timing issue in Kbuild..."
+          # FIX: Comment out the problematic Kprobes check
           sed -i 's/$(error KSU requires Kprobes; enable it (defconfig))/# $(error KSU requires Kprobes; enable it (defconfig))/' drivers/kernelsu/Kbuild
-          echo "✅ Kbuild patched."
           
           HOOK_METHOD="${{ github.event.inputs.hook_method }}"
           
           if [ "$HOOK_METHOD" = "susfs" ]; then
-            echo "➡️ Cloning susfs4ksu (Android 14-6.1)"
+            echo "➡️ Cloning susfs4ksu (versi 14.6.1)"
             git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 sus
             echo "✅ SUSFS berhasil diclone"
             echo "🩹 Patching susfs4ksu"
@@ -127,8 +160,8 @@ jobs:
             echo "➡️ Menggunakan metode Kprobes Hook"
             echo "✅ Kprobes setup selesai"
           fi
-
-          # Delete Protected Exports (Wajib untuk GKI agar modul WiFi/Bluetooth jalan)
+          
+          # Delete Protected Exports
           rm -f android/abi_gki_protected_exports_aarch64
           rm -f android/abi_gki_protected_exports_x86_64
 
@@ -136,9 +169,7 @@ jobs:
         working-directory: gki/common
         run: |
           echo "🛠️ Applying manual Stack Protector fix "
-          # 1. Edit arch/arm64/Kconfig
           sed -i '/config STACKPROTECTOR_PER_TASK/{n;s/def_bool y/bool "Stack Protector per task"\n\tdefault y/;}' arch/arm64/Kconfig
-          # 2. Disable di gki_defconfig
           echo "# CONFIG_STACKPROTECTOR_PER_TASK is not set" >> arch/arm64/configs/gki_defconfig
           echo "✅ Stack Protector fix applied manually."
 
@@ -167,92 +198,93 @@ jobs:
           
           # Base KSU Config
           cat >> $DEFCONFIG <<EOF
-# ===============================================
-# Konfigurasi KSU NEXT (Base)
-CONFIG_KSU=y
-CONFIG_KPM=n
-CONFIG_KSU_SUSFS_SUS_SU=n
-CONFIG_KSU_SYSCALL_HOOK=n
-# Kprobes is now a hard dependency for KSU-Next, regardless of hook method.
-CONFIG_KPROBES=y
-CONFIG_KPROBE_EVENTS=y
-EOF
+          # ===============================================
+          # Konfigurasi KSU NEXT (Base)
+          CONFIG_KSU=y
+          CONFIG_KPM=n
+          CONFIG_KSU_SUSFS_SUS_SU=n
+          CONFIG_KSU_SYSCALL_HOOK=n
+          # Kprobes is now a hard dependency for KSU-Next, regardless of hook method.
+          CONFIG_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          EOF
           
           if [ "$HOOK_METHOD" = "susfs" ]; then
             cat >> $DEFCONFIG <<EOF
-# --- SUSFS Method (with built-in inline hook) ---
-# Add SUSFS configuration settings
-CONFIG_KSU_SUSFS=y
-CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
-CONFIG_KSU_SUSFS_SUS_PATH=y
-CONFIG_KSU_SUSFS_SUS_MOUNT=y
-CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
-CONFIG_KSU_SUSFS_SUS_KSTAT=y
-CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
-CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
-CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
-CONFIG_KSU_SUSFS_TRY_UMOUNT=y
-CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
-CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-CONFIG_KSU_SUSFS_ENABLE_LOG=y
-CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-# Disable other hooks
-CONFIG_KSU_KPROBES_HOOK=n
-CONFIG_KSU_MANUAL_HOOK=n
-CONFIG_KSU_HAS_MANUAL_HOOK=n
-EOF
+          # --- SUSFS Method (with built-in inline hook) ---
+          # Add SUSFS configuration settings
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          # Disable other hooks
+          CONFIG_KSU_KPROBES_HOOK=n
+          CONFIG_KSU_MANUAL_HOOK=n
+          CONFIG_KSU_HAS_MANUAL_HOOK=n
+          EOF
           else
             cat >> $DEFCONFIG <<EOF
-# --- Kprobes Hook Method ---
-# NOTE: KSU Kprobes Hook is now built-in and doesn't need CONFIG_KSU_KPROBES_HOOK=y
-# Kprobes is already enabled in the base config.
-# Disable SUSFS and Manual Hook for Kprobes
-CONFIG_KSU_SUSFS=n
-CONFIG_KSU_MANUAL_HOOK=n
-CONFIG_KSU_HAS_MANUAL_HOOK=n
-EOF
+          # --- Kprobes Hook Method ---
+          # NOTE: KSU Kprobes Hook is now built-in and doesn't need CONFIG_KSU_KPROBES_HOOK=y
+          # Kprobes is already enabled in the base config.
+          # Disable SUSFS and Manual Hook for Kprobes
+          CONFIG_KSU_SUSFS=n
+          CONFIG_KSU_MANUAL_HOOK=n
+          CONFIG_KSU_HAS_MANUAL_HOOK=n
+          EOF
           fi
 
           if [ "$PERFORMANCE_PATCH" = "MediaTek" ]; then
             cat >> $DEFCONFIG <<EOF
-# --- MediaTek Performance Tuning ---
-# Set HZ to 500 for improved responsiveness
-CONFIG_HZ=500
-EOF
+          # --- MediaTek Performance Tuning ---
+          # Set HZ to 500 for improved responsiveness
+          CONFIG_HZ=500
+          EOF
             echo "✅ [MediaTek] Applied HZ=500 config."
           else
             echo "INFO: [Snapdragon] Skipping HZ=500 config."
           fi
           
           cat >> $DEFCONFIG <<EOF
-# Add additional tmpfs config setting
-CONFIG_TMPFS_XATTR=y
-CONFIG_TMPFS_POSIX_ACL=y
-# Add additional config setting
-CONFIG_IP_NF_TARGET_TTL=y
-CONFIG_IP6_NF_TARGET_HL=y
-CONFIG_IP6_NF_MATCH_HL=y
-# Add BBR Config
-CONFIG_TCP_CONG_ADVANCED=y
-CONFIG_TCP_CONG_BBR=y
-CONFIG_NET_SCH_FQ=y
-CONFIG_TCP_CONG_BIC=n
-CONFIG_TCP_CONG_WESTWOOD=n
-CONFIG_TCP_CONG_HTCP=n
-CONFIG_DEFAULT_BBR=y
-# Optimasi tambahan (Smooth & Responsiveness)
-CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
-CONFIG_SCHED_TUNE=y
-CONFIG_MQ_IOSCHED_KYBER=y
-CONFIG_MQ_IOSCHED_BFQ=y
-CONFIG_IOSCHED_BFQ=y
-CONFIG_BFQ_GROUP_IOSCHED=y
-CONFIG_ZRAM=y
-CONFIG_ZRAM_WRITEBACK=y
-EOF
+          # Add additional tmpfs config setting
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          # Add additional config setting
+          CONFIG_IP_NF_TARGET_TTL=y
+          CONFIG_IP6_NF_TARGET_HL=y
+          CONFIG_IP6_NF_MATCH_HL=y
+          # Add BBR Config
+          CONFIG_TCP_CONG_ADVANCED=y
+          CONFIG_TCP_CONG_BBR=y
+          CONFIG_NET_SCH_FQ=y
+          CONFIG_TCP_CONG_BIC=n
+          CONFIG_TCP_CONG_WESTWOOD=n
+          CONFIG_TCP_CONG_HTCP=n
+          CONFIG_DEFAULT_BBR=y
+          # Optimasi tambahan (Smooth & Responsiveness)
+          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+          CONFIG_SCHED_TUNE=y
+          CONFIG_MQ_IOSCHED_KYBER=y
+          CONFIG_MQ_IOSCHED_BFQ=y
+          CONFIG_IOSCHED_BFQ=y
+          CONFIG_BFQ_GROUP_IOSCHED=y
+          CONFIG_ZRAM=y
+          CONFIG_ZRAM_WRITEBACK=y
+          EOF
+
 
       - name: Set version
         working-directory: gki/common
@@ -293,39 +325,57 @@ EOF
         working-directory: gki
         run: |
           mkdir -p prebuilts-master/clang/host/linux-x86
+          
           if [ "${{ github.event.inputs.clang_version }}" == "r416183b (Clang 12)" ]; then
+            echo "Setting up Clang-12 (r416183b)..."
             CLANG_VER="clang-r416183b"
             CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
           elif [ "${{ github.event.inputs.clang_version }}" == "r536225 (Clang 19)" ]; then
+            echo "Setting up Clang-19 (r536225)..."
             CLANG_VER="clang-r536225"
             CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           else
+            echo "Setting up Clang-20 (r547379)..."
             CLANG_VER="clang-r547379"
             CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
           fi
+          
+          echo "CLANG_VER=$CLANG_VER" >> $GITHUB_ENV
+
           mkdir -p prebuilts-master/clang/host/linux-x86/$CLANG_VER
-          curl -L "${CLANG_URL}" | tar -xz -C prebuilts-master/clang/host/linux-x86/$CLANG_VER
           cd prebuilts-master/clang/host/linux-x86
+          curl -L "${CLANG_URL}" | tar -xz -C $CLANG_VER
+          
+          rm -rf clang-r416183b
           ln -sf $CLANG_VER clang-r416183b
+
+      - name: Commit changes
+        working-directory: gki/common
+        run: |
+          git add .
+          git commit -m "Final clean tree before build" || true
+
       - name: Compile
         working-directory: gki
         run: |
           ./tools/bazel build --lto=thin //common:kernel_aarch64_dist
           ./tools/bazel shutdown
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ github.event.inputs.kernel_name }}-${{ github.event.inputs.performance_patch }}-Image
+          name: KSUN-Kernel-${{ github.event.inputs.performance_patch }}-Image
           path: gki/bazel-bin/common/kernel_aarch64_dist/Image
-         
+          if-no-files-found: warn
+
       - name: Push to PixelDrain
-        if: always()
+        if: always() 
         run: |
           if [ -f gki/bazel-bin/common/kernel_aarch64_dist/Image ]; then
             curl -u :4957db96-3517-4957-a772-5c3a5acbccf0 \
               -F file=@gki/bazel-bin/common/kernel_aarch64_dist/Image \
               https://pixeldrain.com/api/file
           else
-            echo "Image file not found. Build likely failed."
+            echo "Image file not found. Build likely failed." 
           fi
