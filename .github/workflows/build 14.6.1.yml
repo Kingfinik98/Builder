@@ -1,0 +1,190 @@
+name: KSUN 6.1 Preshoot Universal mode (Snapdragon/MediaTek)
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_name:
+        description: 'Custom Kernel Name (default)'
+        required: false
+        default: 'GKI'
+        type: string
+      clang_version:
+        description: 'Select Clang Version'
+        required: true
+        type: choice
+        default: 'r536225 (Clang 19)'
+        options:
+          - 'r416183b (Clang 12)'
+          - 'r536225 (Clang 19)'
+          - 'r547379 (Clang 20)'
+      hook_method:
+        description: 'Select Hook Method'
+        required: true
+        type: choice
+        default: 'susfs'
+        options:
+          - 'susfs'
+          - 'kprobes'
+      performance_patch:
+        description: 'Select Device SoC for Performance Tuning'
+        required: true
+        type: choice
+        default: 'Snapdragon'
+        options:
+          - 'Snapdragon'
+          - 'MediaTek'
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.kernel_name }} (${{ github.event.inputs.performance_patch }})
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Free disk space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          swap-size-mb: 10240
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Configure Git
+        run: |
+          git config --global user.name "titit"
+          git config --global user.email "Kingfinik98@gmail.com"
+      - name: Install build tools
+        run: |
+          sudo apt update && sudo apt upgrade -y
+          sudo apt install -y git curl repo build-essential bc bison flex libssl-dev \
+            libelf-dev python3 python3-pip unzip zip rsync libncurses-dev lld
+      - name: Init & Sync GKI
+        run: |
+          mkdir gki && cd gki
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=1
+          repo sync -c --no-tags --no-clone-bundle --optimized-fetch -j12
+      - name: Update kernel source for GKI 6.1
+        run: |
+          cd gki/common
+          git remote add kingfinik https://github.com/Kingfinik98/kernel-android14-6.1.git || true
+          git fetch -j12 kingfinik android14-6.1-lts
+          git checkout -f kingfinik/android14-6.1-lts
+      - name: Apply Snapdragon Performance Patch
+        if: github.event.inputs.performance_patch == 'Snapdragon'
+        working-directory: gki/common
+        run: |
+          TARGET="drivers/cpufreq/qcom-cpufreq-hw.c"
+          SRC_URL="https://raw.githubusercontent.com/Pzqqt/android_kernel_xiaomi_marble/refs/heads/melt-rebase/drivers/cpufreq/qcom-cpufreq-hw.c"
+          if [ -f "$TARGET" ]; then
+            curl -L "$SRC_URL" -o "$TARGET"
+          fi
+      - name: Setup KernelSU-Next & Hook Method (final robust version)
+        working-directory: gki/common
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+
+          # Force correct Kconfig source (removes bad nested, adds direct)
+          sed -i '/kernelsu\/kernel\/Kconfig/d' drivers/Kconfig
+          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+
+          # Debug to confirm
+          echo "=== KSU source line after fix ==="
+          grep kernelsu drivers/Kconfig
+          echo "=== KSU symlink target ==="
+          ls -la drivers/kernelsu | head -n 10
+          echo "=== KSU Kconfig check ==="
+          ls drivers/kernelsu/Kconfig || echo "Missing - unexpected"
+
+          if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
+            # Apply SUSFS logic from snippet for GKI 6.1
+            SUSFS_DIR="susfs"
+            SUSFS_PATCHES="${SUSFS_DIR}/kernel_patches"
+            SUSFS_BRANCH="gki-android14-6.1"
+            git clone --depth=1 -q https://gitlab.com/simonpunk/susfs4ksu -b $SUSFS_BRANCH $SUSFS_DIR
+            cp -R $SUSFS_PATCHES/fs/* ./fs
+            cp -R $SUSFS_PATCHES/include/* ./include
+            patch -p1 < $SUSFS_PATCHES/50_add_susfs_in_${SUSFS_BRANCH}.patch || true
+          fi
+      - name: Inject All Kernel Configs
+        working-directory: gki/common
+        run: |
+          CONFIG_PATH="arch/arm64/configs/gki_defconfig"
+         
+          if [ -n "${{ github.event.inputs.kernel_name }}" ]; then
+            echo "CONFIG_LOCALVERSION=\"-${{ github.event.inputs.kernel_name }}\"" >> "$CONFIG_PATH"
+            echo "CONFIG_LOCALVERSION_AUTO=n" >> "$CONFIG_PATH"
+          fi
+         
+          cat >> "$CONFIG_PATH" <<EOF
+          CONFIG_KSU=y
+          CONFIG_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          EOF
+         
+          if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
+            cat >> "$CONFIG_PATH" <<EOF
+            CONFIG_KSU_SUSFS=y
+            CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_PATH=y
+            CONFIG_KSU_SUSFS_SUS_MOUNT=y
+            CONFIG_KSU_SUSFS_SUS_KSTAT_SPOOF_GENERIC=y
+            CONFIG_KSU_SUSFS_SUS_KSTAT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSTAT=y
+            CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n
+            CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+            CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y
+            CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+            CONFIG_KSU_SUSFS_ENABLE_LOG=y
+            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+            EOF
+          fi
+          
+          if [ "${{ github.event.inputs.performance_patch }}" = "MediaTek" ]; then
+            echo "CONFIG_HZ=500" >> "$CONFIG_PATH"
+          fi
+      - name: Setup Clang
+        working-directory: gki
+        run: |
+          mkdir -p prebuilts-master/clang/host/linux-x86
+          if [ "${{ github.event.inputs.clang_version }}" == "r416183b (Clang 12)" ]; then
+            CLANG_VER="clang-r416183b"
+            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz"
+          elif [ "${{ github.event.inputs.clang_version }}" == "r536225 (Clang 19)" ]; then
+            CLANG_VER="clang-r536225"
+            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
+          else
+            CLANG_VER="clang-r547379"
+            CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
+          fi
+          mkdir -p prebuilts-master/clang/host/linux-x86/$CLANG_VER
+          curl -L "${CLANG_URL}" | tar -xz -C prebuilts-master/clang/host/linux-x86/$CLANG_VER
+          cd prebuilts-master/clang/host/linux-x86
+          ln -sf $CLANG_VER clang-r416183b
+      - name: Compile
+        working-directory: gki
+        run: |
+          ./tools/bazel build --lto=thin //common:kernel_aarch64_dist
+          ./tools/bazel shutdown
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ github.event.inputs.kernel_name }}-${{ github.event.inputs.performance_patch }}-Image
+          path: gki/bazel-bin/common/kernel_aarch64_dist/Image
+         
+      - name: Push to PixelDrain
+        if: always()
+        run: |
+          if [ -f gki/bazel-bin/common/kernel_aarch64_dist/Image ]; then
+            curl -u :4957db96-3517-4957-a772-5c3a5acbccf0 \
+              -F file=@gki/bazel-bin/common/kernel_aarch64_dist/Image \
+              https://pixeldrain.com/api/file
+          else
+            echo "Image file not found. Build likely failed."
+          fi
