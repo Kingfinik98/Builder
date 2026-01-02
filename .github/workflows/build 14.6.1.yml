@@ -81,7 +81,7 @@ jobs:
       - name: Setup KernelSU-Next & Hook Method (final robust version)
         working-directory: gki/common
         run: |
-          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+          ccurl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
 
           # Force correct Kconfig source (removes bad nested, adds direct)
           sed -i '/kernelsu\/kernel\/Kconfig/d' drivers/Kconfig
