@@ -78,48 +78,31 @@ jobs:
           if [ -f "$TARGET" ]; then
             curl -L "$SRC_URL" -o "$TARGET"
           fi
-      - name: Setup KernelSU-Next & Hook Method (Official Guide Method)
+      - name: Install KernelSU-Next & Patch SuSFS
         working-directory: gki/common
         run: |
-          # Install KernelSU-Next
+          # 1. Install Base KernelSU-Next
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
-
-          # Force correct Kconfig source
-          sed -i '/kernelsu\/kernel\/Kconfig/d' drivers/Kconfig
-          grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig || echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-
-          if [ "${{ github.event.inputs.hook_method }}" = "susfs" ]; then
-            SUSFS_DIR="susfs"
-            SUSFS_BRANCH="gki-android14-6.1"
-            
-            # Clone SUSFS repository
-            echo "Cloning SUSFS..."
-            git clone --depth=1 -q https://gitlab.com/simonpunk/susfs4ksu -b $SUSFS_BRANCH $SUSFS_DIR
-            
-            # --- KernelSU Side Patches ---
-            echo "Applying KernelSU side patches..."
-            cp $SUSFS_DIR/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ../KernelSU-Next/
-            cd ../KernelSU-Next
-            patch -p1 < 10_enable_susfs_for_ksu.patch || echo "KSU SUSFS patch applied with warnings/skips"
-            cd common # Return to gki/common
-
-            # --- Kernel Side Patches ---
-            echo "Applying Kernel side patches..."
-            cp $SUSFS_DIR/kernel_patches/50_add_susfs_in_${SUSFS_BRANCH}.patch .
-            
-            # Copy fs and include/linux
-            cp -r $SUSFS_DIR/kernel_patches/fs/* ./fs/
-            mkdir -p ./include/linux
-            cp $SUSFS_DIR/kernel_patches/include/linux/* ./include/linux/
-            
-            # Apply main patch
-            patch -p1 < 50_add_susfs_in_${SUSFS_BRANCH}.patch || echo "Kernel SUSFS patch applied with warnings/skips"
-            
-            # Delete protected exports (Required for modules like WiFi)
-            echo "Removing protected exports..."
-            rm -f android/abi_gki_protected_exports_aarch64
-            rm -f android/abi_gki_protected_exports_x86_64
-          fi
+          
+          # 2. Patch SuSFS (Manual + Fix Conflict) [Sesuai request]
+          echo "Cloning SUSFS Patches (Branch: gki-android14-6.1)..."
+          git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android14-6.1 sus_temp
+          
+          cp -r sus_temp/kernel_patches/fs/* fs/
+          cp -r sus_temp/kernel_patches/include/* include/
+          cp sus_temp/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
+          
+          echo "Applying SUSFS Patch..."
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
+          
+          echo "Fixing fs/proc/base.c conflict..."
+          grep -q "linux/susfs.h" fs/proc/base.c || sed -i '/#include <linux\/fs.h>/a #include <linux/susfs.h>' fs/proc/base.c
+          
+          rm -rf sus_temp 50_add_susfs_in_gki-android14-6.1.patch fs/proc/base.c.rej
+          
+          # 3. Delete Protected Exports (Wajib untuk GKI agar modul WiFi/Bluetooth jalan)
+          rm -f android/abi_gki_protected_exports_aarch64
+          rm -f android/abi_gki_protected_exports_x86_64
       - name: Inject All Kernel Configs
         working-directory: gki/common
         run: |
