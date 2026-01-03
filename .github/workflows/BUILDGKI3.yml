@@ -297,7 +297,7 @@ jobs:
           elif [ "$PERFORMANCE_PATCH" = "MediaTek" ]; then
             SUFFIX="$SUFFIX-Mtk"
           elif [ "$PERFORMANCE_PATCH" = "Universal" ]; then
-            SUFFIX="$SUFFIX-Uni"
+            SUFFIX="$SUFFIX-Univ"
           fi
           
           echo "Setting custom kernel name: $SUFFIX"
